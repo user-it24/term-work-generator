@@ -13,45 +13,130 @@ app.config["MAX_CONTENT_LENGTH"] = 20 * 1024 * 1024  # 20 MB
 TEMPLATE_PATH = os.path.join(os.path.dirname(__file__), "term_work_template.pdf")
 
 def extract_titles(pdf_bytes):
-    """Extract numbered practical/experiment titles from a practical-list PDF."""
+    """Extract practical titles, including table-based PDFs with a separate Sr. No. column."""
     doc = fitz.open(stream=pdf_bytes, filetype="pdf")
-    lines = []
-    for page in doc:
-        lines.extend(page.get_text("text").splitlines())
-    doc.close()
-
     found = []
-    patterns = [
-        re.compile(r"^\s*(?:practical|experiment|exp\.?)\s*(?:no\.?)?\s*[-:#.]?\s*(\d{1,3})\s*[:.)\-–]\s*(.+?)\s*$", re.I),
-        re.compile(r"^\s*(\d{1,3})\s*[.)\-:]\s*(.+?)\s*$"),
-        re.compile(r"^\s*(\d{1,3})\s+(.{4,})\s*$"),
-    ]
-    for raw in lines:
-        line = re.sub(r"\s+", " ", raw).strip()
-        if not line:
-            continue
-        # Ignore common headings and page furniture.
-        if re.search(r"\b(practical list|list of experiments|index|contents|sr\.?\s*no|serial no|experiment title|subject code|page no)\b", line, re.I):
-            continue
-        for pattern in patterns:
-            match = pattern.match(line)
-            if match:
-                number, title = match.group(1), match.group(2).strip()
-                title = re.sub(r"\s+(?:page\s*)?\d+\s*$", "", title, flags=re.I).strip()
-                title = title.strip(" .\t-–:")
-                if title and len(title) > 1:
-                    found.append((int(number), title))
-                    break
 
-    # De-duplicate repeated headers or extracted table text; preserve first occurrence.
+    try:
+        for page in doc:
+            # First try coordinate-aware extraction. This works when PDF text is
+            # stored in separate table columns (serial numbers and titles).
+            blocks = page.get_text("blocks")
+            serials = []
+            column_blocks = []
+
+            for block in blocks:
+                x0, y0, x1, y1, raw = block[:5]
+                text = re.sub(r"\\s+", " ", raw).strip()
+                if not text:
+                    continue
+
+                # Some PDF extractors merge the end of a title and its Aim
+                # paragraph into one block. Keep only the part before "Aim:".
+                if re.match(r"^aim\\s*:", text, re.I):
+                    text = ""
+                elif re.search(r"\\baim\\s*:", text, re.I):
+                    text = re.split(r"\\baim\\s*:", text, maxsplit=1, flags=re.I)[0].strip()
+                if not text:
+                    continue
+
+                # Serial numbers are in the leftmost column, often as "1.",
+                # "2." ... or just "4" with no punctuation.
+                if x0 < 80 and y0 > 190:
+                    m = re.fullmatch(r"(\\d{1,3})\\s*[.)]?", text)
+                    if m:
+                        serials.append((int(m.group(1)), float(y0)))
+
+                # Keep all text blocks in the title column so wrapped title
+                # lines can be joined before the following "Aim:" paragraph.
+                if 80 <= x0 < 320 and y0 > 195:
+                    if re.search(r"\\b(?:rubrics|total marks|sign\\.?|pg\\.? no\\.?)\\b", text, re.I):
+                        continue
+                    if re.match(r"^(?:index$|title$|sr\\.?\\s*no\\.?$)", text, re.I):
+                        continue
+                    column_blocks.append((float(y0), text))
+
+            serials.sort(key=lambda item: item[1])
+            column_blocks.sort(key=lambda item: item[0])
+
+            used_title_positions = set()
+            for number, serial_y in serials:
+                candidates = [
+                    (abs(title_y - serial_y), idx, title_y, title)
+                    for idx, (title_y, title) in enumerate(column_blocks)
+                    if idx not in used_title_positions
+                    and not re.match(r"^aim\\s*:", title, re.I)
+                ]
+                if not candidates:
+                    continue
+                distance, idx, title_y, title = min(candidates, key=lambda item: item[0])
+                if distance > 24:
+                    continue
+
+                # Join wrapped title lines that appear before the Aim paragraph.
+                parts = [title]
+                used_title_positions.add(idx)
+                for next_idx in range(idx + 1, len(column_blocks)):
+                    next_y, next_text = column_blocks[next_idx]
+                    if re.match(r"^aim\\s*:", next_text, re.I):
+                        break
+                    # Stop if the next serial number belongs to a new row.
+                    if any(abs(next_y - sy) < 10 and sn != number for sn, sy in serials):
+                        break
+                    if next_idx in used_title_positions:
+                        continue
+                    # Only join lines close to this title; large gaps indicate a new row.
+                    if next_y - column_blocks[next_idx - 1][0] > 22:
+                        break
+                    parts.append(next_text)
+                    used_title_positions.add(next_idx)
+
+                title = re.sub(r"\\s+", " ", " ".join(parts)).strip(" .\\t-–:")
+                if title and len(title) > 1:
+                    found.append((number, title))
+
+    finally:
+        doc.close()
+
+    # If coordinate-aware extraction did not find anything, fall back to common
+    # numbered-text formats such as "1. Title" and "Practical 1: Title".
+    if not found:
+        doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+        try:
+            lines = []
+            for page in doc:
+                lines.extend(page.get_text("text", sort=True).splitlines())
+
+            patterns = [
+                re.compile(r"^\\s*(?:practical|experiment|exp\\.?)\\s*(?:no\\.?)?\\s*[-:#.]?\\s*(\\d{1,3})\\s*[:.)\\-–]\\s*(.+?)\\s*$", re.I),
+                re.compile(r"^\\s*(\\d{1,3})\\s*[.)\\-:]\\s*(.+?)\\s*$"),
+                re.compile(r"^\\s*(\\d{1,3})\\s+(.{4,})\\s*$"),
+            ]
+            for raw in lines:
+                line = re.sub(r"\\s+", " ", raw).strip()
+                if not line or re.match(r"^aim\\s*:", line, re.I):
+                    continue
+                if re.search(r"\\b(practical list|list of experiments|index|contents|sr\\.?\\s*no|serial no|experiment title|subject code|page no)\\b", line, re.I):
+                    continue
+                for pattern in patterns:
+                    match = pattern.match(line)
+                    if match:
+                        number, title = match.group(1), match.group(2).strip()
+                        title = title.strip(" .\\t-–:")
+                        if title and len(title) > 1:
+                            found.append((int(number), title))
+                            break
+        finally:
+            doc.close()
+
+    # De-duplicate and preserve serial-number order.
     unique = []
     seen = set()
-    for number, title in found:
-        key = (number, re.sub(r"\W+", "", title.lower()))
+    for number, title in sorted(found, key=lambda item: item[0]):
+        key = (number, re.sub(r"\\W+", "", title.lower()))
         if key not in seen:
             unique.append((number, title))
             seen.add(key)
-    unique.sort(key=lambda item: item[0])
     return [title for _, title in unique]
 
 def fit_text(c, text, x, y_top, max_width, font="Times-Roman", size=10.5):
