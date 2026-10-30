@@ -189,7 +189,7 @@ def fit_text_centered(c, text, left, right, y_top, font="Times-Bold", size=13, c
     fit_text(c, text, x, y_top, field_width, font=font, size=current_size, clear_line=clear_line)
 
 
-def wrap_title_for_template(title, font="Times-Bold", size=11):
+def wrap_title_for_template(title, font="Times-Bold", size=13):
     """Wrap title for the short first line and two full-width continuation lines."""
     title = re.sub(r"\s+", " ", str(title or "")).strip()
     words = title.split()
@@ -201,7 +201,7 @@ def wrap_title_for_template(title, font="Times-Bold", size=11):
 
     # Try a comfortably readable font first, then reduce it slightly only for
     # unusually long titles so the complete title fits into the template area.
-    for font_size in [size, 10.5, 10, 9.5, 9, 8.5]:
+    for font_size in [size, 12.5, 12, 11.5, 11, 10.5, 10, 9.5]:
         lines = []
         current = ""
         available = first_width
@@ -257,10 +257,10 @@ def build_pdf(data, titles):
         fit_text_centered(c, data.get("term", ""), 290, 378, 190, size=11.5)
         fit_text(c, data.get("subject", ""), 115, 224, 445, size=12.5)
         fit_text(c, data.get("pen", ""), 98, 248, 218, size=12.5)
-        fit_text_centered(c, data.get("semester", ""), 424, 558, 251, size=12.5)
+        fit_text_centered(c, data.get("semester", ""), 424, 558, 248, size=12.5)
         fit_text_centered(c, data.get("student_name", ""), 170, 558, 272, size=13.5)
         fit_text_centered(c, data.get("class_name", ""), 65, 278, 298, size=11.5)
-        fit_text_centered(c, data.get("batch", ""), 312, 558, 300, size=12.5)
+        fit_text_centered(c, data.get("batch", ""), 312, 558, 297, size=12.5)
 
         title_lines, title_size = wrap_title_for_template(title)
         title_positions = [
@@ -274,7 +274,7 @@ def build_pdf(data, titles):
                 size=title_size, clear_line=True
             )
 
-        fit_text_centered(c, str(index), 442, 568, 422, size=12.5)
+        fit_text_centered(c, str(index), 442, 568, 419, size=12.5)
         fit_text(c, data.get("checked_by", ""), 142, 544, 416, size=13)
 
         c.save()
