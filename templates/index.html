@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Term Work Generator</title>
+<style>
+:root{--ink:#172033;--muted:#65718a;--line:#dce3ef;--primary:#3659d9;--bg:#f4f7fc;--card:#fff}
+*{box-sizing:border-box}body{margin:0;font-family:Inter,Segoe UI,Arial,sans-serif;background:var(--bg);color:var(--ink)}
+header{background:linear-gradient(120deg,#182b66,#3659d9);color:#fff;padding:32px 20px}
+.hero{max-width:1050px;margin:auto}.hero h1{margin:0 0 8px;font-size:clamp(26px,4vw,38px)}.hero p{margin:0;color:#e0e7ff;line-height:1.55}
+main{max-width:1050px;margin:24px auto;padding:0 16px 40px}.card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:22px;margin-bottom:18px;box-shadow:0 8px 28px #1b2a4a0a}
+h2{font-size:19px;margin:0 0 8px}.sub{color:var(--muted);font-size:14px;margin:0 0 18px;line-height:1.5}
+.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:15px}.field label{display:block;font-size:13px;font-weight:700;margin-bottom:7px}.field input,.field textarea{width:100%;border:1px solid #cbd5e5;border-radius:9px;padding:11px 12px;font:inherit;background:#fff;color:var(--ink)}.field input:focus,.field textarea:focus{outline:2px solid #c7d2fe;border-color:var(--primary)}
+.upload{border:2px dashed #b8c6e4;border-radius:12px;padding:22px;background:#f9fbff}.upload input{max-width:100%}.row{display:flex;align-items:center;gap:12px;flex-wrap:wrap}.btn{border:0;border-radius:10px;padding:12px 18px;font-weight:700;font-size:14px;cursor:pointer}.primary{background:var(--primary);color:white}.secondary{background:#e8edff;color:#2746bd}.btn:disabled{opacity:.5;cursor:not-allowed}.status{font-size:14px;color:var(--muted);margin-top:12px}.status.error{color:#b42318}.status.success{color:#187044}.count{font-weight:700;color:#2746bd}textarea#titles{min-height:210px;resize:vertical;line-height:1.6}.hint{font-size:12px;color:var(--muted);margin-top:6px}.actions{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}.note{font-size:13px;color:var(--muted);line-height:1.5}.badge{display:inline-block;background:#edf2ff;color:#2e49ad;border-radius:99px;padding:5px 9px;font-size:12px;font-weight:700}
+@media(max-width:650px){.grid{grid-template-columns:1fr}.card{padding:17px}}
+</style>
+</head>
+<body>
+<header><div class="hero"><h1>Term Work Generator</h1><p>Upload your practical list, enter your details once, and generate every term-work page in a single PDF.</p></div></header>
+<main>
+<form id="generatorForm" action="/generate" method="post">
+<section class="card">
+<h2>1. Upload practical list</h2><p class="sub">Upload a text-based PDF containing numbered experiments and titles. The app will extract the titles automatically.</p>
+<div class="upload"><input type="file" id="practical_pdf" name="practical_pdf" accept="application/pdf,.pdf" required><div class="row" style="margin-top:14px"><button type="button" class="btn secondary" id="extractBtn">Read practical list</button><span class="badge" id="countBadge">No list loaded</span></div><div class="status" id="uploadStatus" role="status"></div></div>
+</section>
+<section class="card">
+<h2>2. Student and subject details</h2><p class="sub">These details are repeated on every generated page.</p>
+<div class="grid">
+<div class="field"><label for="term">TERM</label><input id="term" name="term" placeholder="e.g. 2026–27" required></div>
+<div class="field"><label for="subject">Subject</label><input id="subject" name="subject" placeholder="e.g. Data Analytics and Visualization" required></div>
+<div class="field"><label for="pen">PEN</label><input id="pen" name="pen" placeholder="Enter PEN" required></div>
+<div class="field"><label for="semester">Semester</label><input id="semester" name="semester" placeholder="e.g. 5" required></div>
+<div class="field"><label for="student_name">Name of Student</label><input id="student_name" name="student_name" placeholder="Full name" required></div>
+<div class="field"><label for="class_name">Class</label><input id="class_name" name="class_name" placeholder="e.g. IT" required></div>
+<div class="field"><label for="batch">Batch</label><input id="batch" name="batch" placeholder="e.g. A2" required></div>
+<div class="field"><label for="checked_by">Checked By</label><input id="checked_by" name="checked_by" placeholder="Faculty / checker name" required></div>
+</div>
+</section>
+<section class="card">
+<h2>3. Review experiment titles</h2><p class="sub">One title per line. Practical/Term Work No. is assigned automatically as 1, 2, 3… in the order shown below. You can correct titles if the PDF extraction is imperfect.</p>
+<div class="field"><label for="titles">Experiment titles</label><textarea id="titles" name="titles" placeholder="Upload a PDF and click “Read practical list”, or paste one title per line." required></textarea><div class="hint">Only the title and serial number vary between pages. Dates, marks, remarks and signature areas stay blank for manual completion.</div></div>
+</section>
+<section class="card">
+<div class="actions"><div><h2 style="margin-bottom:5px">4. Generate your PDF</h2><div class="note">The output contains one copy of the college term-work template per title.</div></div><button class="btn primary" type="submit">Generate & Download PDF</button></div>
+<div class="status" id="generateStatus" role="status"></div>
+</section>
+</form>
+</main>
+<script>
+const fileInput = document.getElementById('practical_pdf');
+const extractBtn = document.getElementById('extractBtn');
+const titlesBox = document.getElementById('titles');
+const uploadStatus = document.getElementById('uploadStatus');
+const countBadge = document.getElementById('countBadge');
+
+extractBtn.addEventListener('click', async () => {
+  const file = fileInput.files[0];
+  if (!file) { uploadStatus.textContent = 'Choose a practical-list PDF first.'; uploadStatus.className='status error'; return; }
+  if (!file.name.toLowerCase().endsWith('.pdf')) { uploadStatus.textContent='Please choose a PDF file.'; uploadStatus.className='status error'; return; }
+  const form = new FormData(); form.append('practical_pdf', file);
+  extractBtn.disabled = true; extractBtn.textContent = 'Reading…';
+  uploadStatus.textContent = 'Extracting numbered practical titles…'; uploadStatus.className='status';
+  try {
+    const response = await fetch('/extract', {method:'POST', body:form});
+    const data = await response.json();
+    if (data.titles) {
+      titlesBox.value = data.titles.join('\n');
+      countBadge.textContent = `${data.count} practical(s) found`;
+      uploadStatus.textContent = 'Titles extracted. Review them below, complete your details, and generate the PDF.';
+      uploadStatus.className='status success';
+    } else {
+      uploadStatus.textContent = data.error || 'Could not extract titles.';
+      uploadStatus.className='status error';
+      countBadge.textContent = 'Manual title entry needed';
+    }
+  } catch(e) {
+    uploadStatus.textContent = 'Could not read the file. Check the PDF and try again.';
+    uploadStatus.className='status error';
+  } finally { extractBtn.disabled=false; extractBtn.textContent='Read practical list'; }
+});
+
+document.getElementById('generatorForm').addEventListener('submit', (e) => {
+  const lines = titlesBox.value.split(/\r?\n/).map(x=>x.trim()).filter(Boolean);
+  if (!lines.length) { e.preventDefault(); alert('Add at least one practical title.'); return; }
+  document.getElementById('generateStatus').textContent = `Generating ${lines.length} page(s)…`;
+});
+</script>
+</body>
+</html>
