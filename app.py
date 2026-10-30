@@ -140,7 +140,7 @@ def extract_titles(pdf_bytes):
     return [title for _, title in unique]
 
 def fit_text(c, text, x, y_top, max_width, font="Times-Bold", size=11, clear_line=True):
-    """Draw readable, moderately bold text aligned to a template field.
+    """Draw moderately bold text, fitting it inside the target field.
 
     y_top is measured from the top edge of the A4 page. A small white
     background behind the value hides the template's underline only where
@@ -171,6 +171,22 @@ def fit_text(c, text, x, y_top, max_width, font="Times-Bold", size=11, clear_lin
     c.setFillColorRGB(0, 0, 0)
     c.setFont(font, current_size)
     c.drawString(x, baseline_y, text)
+
+
+def fit_text_centered(c, text, left, right, y_top, font="Times-Bold", size=14):
+    """Draw a value horizontally centered in its designated template field."""
+    text = str(text or "").strip()
+    if not text:
+        return
+
+    field_width = right - left
+    current_size = size
+    while current_size > 10 and stringWidth(text, font, current_size) > field_width - 8:
+        current_size -= 0.25
+
+    text_width = stringWidth(text, font, current_size)
+    x = left + (field_width - text_width) / 2
+    fit_text(c, text, x, y_top, field_width, font=font, size=current_size, clear_line=True)
 
 
 def wrap_title_for_template(title, font="Times-Bold", size=11):
@@ -229,13 +245,15 @@ def build_pdf(data, titles):
         # These top-origin positions are aligned to the actual blank template.
         # The values use a modest bold font and a small white patch to avoid
         # printing text directly over the underscore line.
-        fit_text(c, data.get("term", ""), 305, 189, 70, size=11)
-        fit_text(c, data.get("subject", ""), 115, 224, 445, size=11)
-        fit_text(c, data.get("pen", ""), 98, 248, 218, size=11)
-        fit_text(c, data.get("semester", ""), 382, 248, 176, size=11)
-        fit_text(c, data.get("student_name", ""), 170, 272, 388, size=11)
-        fit_text(c, data.get("class_name", ""), 102, 296, 205, size=11)
-        fit_text(c, data.get("batch", ""), 352, 296, 205, size=11)
+        # Center the requested identity fields within their printed spaces and
+        # increase their text from 11 pt to 14 pt (auto-shrunk only if needed).
+        fit_text_centered(c, data.get("term", ""), 290, 378, 189, size=14)
+        fit_text(c, data.get("subject", ""), 115, 224, 445, size=12.5)
+        fit_text(c, data.get("pen", ""), 98, 248, 218, size=12.5)
+        fit_text(c, data.get("semester", ""), 382, 248, 176, size=12.5)
+        fit_text_centered(c, data.get("student_name", ""), 170, 558, 272, size=14)
+        fit_text_centered(c, data.get("class_name", ""), 65, 278, 296, size=14)
+        fit_text_centered(c, data.get("batch", ""), 312, 558, 296, size=14)
 
         title_lines, title_size = wrap_title_for_template(title)
         title_positions = [
