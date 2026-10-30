@@ -245,13 +245,13 @@ def build_pdf(data, titles):
         # Center values inside their designated spaces. Slightly smaller text
         # for TERM and Class keeps it from covering the printed underline.
         # Text is placed a little above the underline so the original line stays visible.
-        fit_text_centered(c, data.get("term", ""), 290, 378, 181, size=12.5)
+        fit_text_centered(c, data.get("term", ""), 290, 378, 190, size=11.5)
         fit_text(c, data.get("subject", ""), 115, 224, 445, size=12.5)
         fit_text(c, data.get("pen", ""), 98, 248, 218, size=12.5)
-        fit_text_centered(c, data.get("semester", ""), 424, 558, 242, size=12.5)
-        fit_text_centered(c, data.get("student_name", ""), 170, 558, 268, size=13.5)
-        fit_text_centered(c, data.get("class_name", ""), 65, 278, 289, size=12.5)
-        fit_text_centered(c, data.get("batch", ""), 312, 558, 291, size=12.5)
+        fit_text_centered(c, data.get("semester", ""), 424, 558, 251, size=12.5)
+        fit_text_centered(c, data.get("student_name", ""), 170, 558, 272, size=13.5)
+        fit_text_centered(c, data.get("class_name", ""), 65, 278, 298, size=11.5)
+        fit_text_centered(c, data.get("batch", ""), 312, 558, 300, size=12.5)
 
         title_lines, title_size = wrap_title_for_template(title)
         title_positions = [
@@ -265,8 +265,8 @@ def build_pdf(data, titles):
                 size=title_size, clear_line=True
             )
 
-        fit_text_centered(c, str(index), 442, 568, 414, size=12.5)
-        fit_text(c, data.get("checked_by", ""), 142, 540, 416, size=13)
+        fit_text_centered(c, str(index), 442, 568, 422, size=12.5)
+        fit_text(c, data.get("checked_by", ""), 142, 544, 416, size=13)
 
         c.save()
         overlay_io.seek(0)
