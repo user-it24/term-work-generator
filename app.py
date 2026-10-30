@@ -232,13 +232,22 @@ def wrap_title_for_template(title, font="Times-Bold", size=11):
 
 
 def build_pdf(data, titles):
-    template_reader = PdfReader(TEMPLATE_PATH)
-    template_page = template_reader.pages[0]
+    # Keep the original template bytes and load a fresh page for every practical.
+    # A shallow copy of a pypdf PageObject can share internal content/resources;
+    # merging overlays into such copies can cause pages to repeat or accumulate
+    # the same title/number. Reloading the template for each page avoids that.
+    with open(TEMPLATE_PATH, "rb") as template_file:
+        template_bytes = template_file.read()
+
+    first_reader = PdfReader(io.BytesIO(template_bytes))
+    first_page = first_reader.pages[0]
+    page_width = float(first_page.mediabox.width)
+    page_height = float(first_page.mediabox.height)
     writer = PdfWriter()
-    page_width = float(template_page.mediabox.width)
-    page_height = float(template_page.mediabox.height)
 
     for index, title in enumerate(titles, start=1):
+        template_reader = PdfReader(io.BytesIO(template_bytes))
+        template_page = template_reader.pages[0]
         overlay_io = io.BytesIO()
         c = canvas.Canvas(overlay_io, pagesize=(page_width, page_height))
 
@@ -272,12 +281,11 @@ def build_pdf(data, titles):
         overlay_io.seek(0)
         overlay_page = PdfReader(overlay_io).pages[0]
 
-        # Copy the original blank page for every practical, so overlays do not
-        # accumulate and each output page starts from the same clean template.
-        import copy
-        page = copy.copy(template_page)
-        page.merge_page(overlay_page)
-        writer.add_page(page)
+        # Each loop iteration owns a newly loaded template page, so this merge
+        # changes only the current page and every practical keeps its own title
+        # and sequential number.
+        template_page.merge_page(overlay_page)
+        writer.add_page(template_page)
 
     output = io.BytesIO()
     writer.write(output)
