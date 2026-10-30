@@ -3,7 +3,7 @@ import os
 import re
 import textwrap
 from flask import Flask, render_template, request, jsonify, send_file
-import fitz  # PyMuPDF
+import pymupdf as fitz  # PyMuPDF
 from reportlab.pdfgen import canvas
 from reportlab.pdfbase.pdfmetrics import stringWidth
 from pypdf import PdfReader, PdfWriter
@@ -27,32 +27,32 @@ def extract_titles(pdf_bytes):
 
             for block in blocks:
                 x0, y0, x1, y1, raw = block[:5]
-                text = re.sub(r"\\s+", " ", raw).strip()
+                text = re.sub(r"\s+", " ", raw).strip()
                 if not text:
                     continue
 
                 # Some PDF extractors merge the end of a title and its Aim
                 # paragraph into one block. Keep only the part before "Aim:".
-                if re.match(r"^aim\\s*:", text, re.I):
+                if re.match(r"^aim\s*:", text, re.I):
                     text = ""
-                elif re.search(r"\\baim\\s*:", text, re.I):
-                    text = re.split(r"\\baim\\s*:", text, maxsplit=1, flags=re.I)[0].strip()
+                elif re.search(r"\baim\s*:", text, re.I):
+                    text = re.split(r"\baim\s*:", text, maxsplit=1, flags=re.I)[0].strip()
                 if not text:
                     continue
 
                 # Serial numbers are in the leftmost column, often as "1.",
                 # "2." ... or just "4" with no punctuation.
                 if x0 < 80 and y0 > 190:
-                    m = re.fullmatch(r"(\\d{1,3})\\s*[.)]?", text)
+                    m = re.fullmatch(r"(\d{1,3})\s*[.)]?", text)
                     if m:
                         serials.append((int(m.group(1)), float(y0)))
 
                 # Keep all text blocks in the title column so wrapped title
                 # lines can be joined before the following "Aim:" paragraph.
                 if 80 <= x0 < 320 and y0 > 195:
-                    if re.search(r"\\b(?:rubrics|total marks|sign\\.?|pg\\.? no\\.?)\\b", text, re.I):
+                    if re.search(r"\b(?:rubrics|total marks|sign\.?|pg\.? no\.?)\b", text, re.I):
                         continue
-                    if re.match(r"^(?:index$|title$|sr\\.?\\s*no\\.?$)", text, re.I):
+                    if re.match(r"^(?:index$|title$|sr\.?\s*no\.?$)", text, re.I):
                         continue
                     column_blocks.append((float(y0), text))
 
@@ -65,7 +65,7 @@ def extract_titles(pdf_bytes):
                     (abs(title_y - serial_y), idx, title_y, title)
                     for idx, (title_y, title) in enumerate(column_blocks)
                     if idx not in used_title_positions
-                    and not re.match(r"^aim\\s*:", title, re.I)
+                    and not re.match(r"^aim\s*:", title, re.I)
                 ]
                 if not candidates:
                     continue
@@ -78,7 +78,7 @@ def extract_titles(pdf_bytes):
                 used_title_positions.add(idx)
                 for next_idx in range(idx + 1, len(column_blocks)):
                     next_y, next_text = column_blocks[next_idx]
-                    if re.match(r"^aim\\s*:", next_text, re.I):
+                    if re.match(r"^aim\s*:", next_text, re.I):
                         break
                     # Stop if the next serial number belongs to a new row.
                     if any(abs(next_y - sy) < 10 and sn != number for sn, sy in serials):
@@ -91,7 +91,7 @@ def extract_titles(pdf_bytes):
                     parts.append(next_text)
                     used_title_positions.add(next_idx)
 
-                title = re.sub(r"\\s+", " ", " ".join(parts)).strip(" .\\t-–:")
+                title = re.sub(r"\s+", " ", " ".join(parts)).strip(" .\t-–:")
                 if title and len(title) > 1:
                     found.append((number, title))
 
@@ -108,21 +108,21 @@ def extract_titles(pdf_bytes):
                 lines.extend(page.get_text("text", sort=True).splitlines())
 
             patterns = [
-                re.compile(r"^\\s*(?:practical|experiment|exp\\.?)\\s*(?:no\\.?)?\\s*[-:#.]?\\s*(\\d{1,3})\\s*[:.)\\-–]\\s*(.+?)\\s*$", re.I),
-                re.compile(r"^\\s*(\\d{1,3})\\s*[.)\\-:]\\s*(.+?)\\s*$"),
-                re.compile(r"^\\s*(\\d{1,3})\\s+(.{4,})\\s*$"),
+                re.compile(r"^\s*(?:practical|experiment|exp\.?)\s*(?:no\.?)?\s*[-:#.]?\s*(\d{1,3})\s*[:.)\-–]\s*(.+?)\s*$", re.I),
+                re.compile(r"^\s*(\d{1,3})\s*[.)\-:]\s*(.+?)\s*$"),
+                re.compile(r"^\s*(\d{1,3})\s+(.{4,})\s*$"),
             ]
             for raw in lines:
-                line = re.sub(r"\\s+", " ", raw).strip()
-                if not line or re.match(r"^aim\\s*:", line, re.I):
+                line = re.sub(r"\s+", " ", raw).strip()
+                if not line or re.match(r"^aim\s*:", line, re.I):
                     continue
-                if re.search(r"\\b(practical list|list of experiments|index|contents|sr\\.?\\s*no|serial no|experiment title|subject code|page no)\\b", line, re.I):
+                if re.search(r"\b(practical list|list of experiments|index|contents|sr\.?\s*no|serial no|experiment title|subject code|page no)\b", line, re.I):
                     continue
                 for pattern in patterns:
                     match = pattern.match(line)
                     if match:
                         number, title = match.group(1), match.group(2).strip()
-                        title = title.strip(" .\\t-–:")
+                        title = title.strip(" .\t-–:")
                         if title and len(title) > 1:
                             found.append((int(number), title))
                             break
@@ -133,7 +133,7 @@ def extract_titles(pdf_bytes):
     unique = []
     seen = set()
     for number, title in sorted(found, key=lambda item: item[0]):
-        key = (number, re.sub(r"\\W+", "", title.lower()))
+        key = (number, re.sub(r"\W+", "", title.lower()))
         if key not in seen:
             unique.append((number, title))
             seen.add(key)
@@ -217,8 +217,11 @@ def extract():
         return jsonify({"error": "Please upload a practical-list PDF file."}), 400
     try:
         titles = extract_titles(file.read())
-    except Exception:
-        return jsonify({"error": "Could not read this PDF. Try a text-based PDF rather than a scanned image."}), 400
+    except Exception as exc:
+        app.logger.exception("PDF extraction failed")
+        return jsonify({
+            "error": f"PDF extraction failed ({type(exc).__name__}). Please try again or contact support."
+        }), 400
     if not titles:
         return jsonify({
             "error": "No numbered practical titles were detected. This may be a scanned PDF or use a different format. You can type/paste the titles into the list below, one title per line."
