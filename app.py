@@ -139,28 +139,81 @@ def extract_titles(pdf_bytes):
             seen.add(key)
     return [title for _, title in unique]
 
-def fit_text(c, text, x, y_top, max_width, font="Times-Roman", size=10.5):
-    """Draw a line of text at x and a top-origin y coordinate."""
-    c.setFont(font, size)
-    text = str(text or "").strip()
-    while size > 7 and stringWidth(text, font, size) > max_width:
-        size -= 0.25
-        c.setFont(font, size)
-    c.drawString(x, 842 - y_top - size, text)
+def fit_text(c, text, x, y_top, max_width, font="Times-Bold", size=11, clear_line=True):
+    """Draw readable, moderately bold text aligned to a template field.
 
-def wrap_title(title, max_width=475, font="Times-Roman", size=10.5):
-    words = str(title).split()
-    lines, current = [], ""
-    for word in words:
-        trial = f"{current} {word}".strip()
-        if stringWidth(trial, font, size) <= max_width or not current:
-            current = trial
-        else:
+    y_top is measured from the top edge of the A4 page. A small white
+    background behind the value hides the template's underline only where
+    the value is written, keeping the rest of the form unchanged.
+    """
+    text = str(text or "").strip()
+    if not text:
+        return
+
+    current_size = size
+    while current_size > 9 and stringWidth(text, font, current_size) > max_width:
+        current_size -= 0.25
+
+    text_width = stringWidth(text, font, current_size)
+    baseline_y = 842 - y_top - current_size
+
+    if clear_line:
+        c.setFillColorRGB(1, 1, 1)
+        c.rect(
+            x - 1.5,
+            baseline_y - 1.5,
+            min(max_width, text_width + 4),
+            current_size + 4,
+            fill=1,
+            stroke=0,
+        )
+
+    c.setFillColorRGB(0, 0, 0)
+    c.setFont(font, current_size)
+    c.drawString(x, baseline_y, text)
+
+
+def wrap_title_for_template(title, font="Times-Bold", size=11):
+    """Wrap title for the short first line and two full-width continuation lines."""
+    title = re.sub(r"\s+", " ", str(title or "")).strip()
+    words = title.split()
+    if not words:
+        return [], size
+
+    first_width = 560.5 - 317.0
+    continuation_width = 560.5 - 66.0
+
+    # Try a comfortably readable font first, then reduce it slightly only for
+    # unusually long titles so the complete title fits into the template area.
+    for font_size in [size, 10.5, 10, 9.5, 9, 8.5]:
+        lines = []
+        current = ""
+        available = first_width
+
+        for word in words:
+            trial = f"{current} {word}".strip()
+            if stringWidth(trial, font, font_size) <= available:
+                current = trial
+            elif not current:
+                # A single unusually long word: allow fit_text to shrink it.
+                current = word
+            else:
+                lines.append(current)
+                current = word
+                available = continuation_width
+
+        if current:
             lines.append(current)
-            current = word
-    if current:
-        lines.append(current)
-    return lines[:3]
+
+        # The template provides three title lines. Only accept a size that
+        # fits the entire title in those lines; never silently discard words.
+        if len(lines) <= 3:
+            return lines, font_size
+
+    # For exceptionally long titles, retain all words and let the last line
+    # be shrunk to fit its available width.
+    return lines[:3], 9.5
+
 
 def build_pdf(data, titles):
     template_reader = PdfReader(TEMPLATE_PATH)
@@ -173,29 +226,38 @@ def build_pdf(data, titles):
         overlay_io = io.BytesIO()
         c = canvas.Canvas(overlay_io, pagesize=(page_width, page_height))
 
-        # Fill only the fields students want pre-filled. Dates, marks, remarks,
-        # signature and other assessment fields remain blank for manual completion.
-        fit_text(c, data.get("term", ""), 300, 198, 100, size=10.5)
-        fit_text(c, data.get("subject", ""), 118, 232, 445, size=10.5)
-        fit_text(c, data.get("pen", ""), 100, 256, 195, size=10.5)
-        fit_text(c, data.get("semester", ""), 385, 256, 170, size=10.5)
-        fit_text(c, data.get("student_name", ""), 173, 281, 390, size=10.5)
-        fit_text(c, data.get("class_name", ""), 104, 306, 190, size=10.5)
-        fit_text(c, data.get("batch", ""), 344, 306, 210, size=10.5)
+        # These top-origin positions are aligned to the actual blank template.
+        # The values use a modest bold font and a small white patch to avoid
+        # printing text directly over the underscore line.
+        fit_text(c, data.get("term", ""), 305, 189, 70, size=11)
+        fit_text(c, data.get("subject", ""), 115, 224, 445, size=11)
+        fit_text(c, data.get("pen", ""), 98, 248, 218, size=11)
+        fit_text(c, data.get("semester", ""), 382, 248, 176, size=11)
+        fit_text(c, data.get("student_name", ""), 170, 272, 388, size=11)
+        fit_text(c, data.get("class_name", ""), 102, 296, 205, size=11)
+        fit_text(c, data.get("batch", ""), 352, 296, 205, size=11)
 
-        title_lines = wrap_title(title)
-        positions = [(318, 329), (65, 354), (65, 378)]
-        for line, (x, y) in zip(title_lines, positions):
-            fit_text(c, line, x, y, 490 if x < 100 else 245, size=10.5)
+        title_lines, title_size = wrap_title_for_template(title)
+        title_positions = [
+            (317, 320, 243),
+            (66, 344, 494),
+            (66, 368, 494),
+        ]
+        for line, (x, y_top, max_width) in zip(title_lines, title_positions):
+            fit_text(
+                c, line, x, y_top, max_width,
+                size=title_size, clear_line=True
+            )
 
-        fit_text(c, str(index), 442, 427, 100, size=10.5)
-        fit_text(c, data.get("checked_by", ""), 145, 555, 410, size=10.5)
+        fit_text(c, str(index), 443, 418, 125, size=11)
+        fit_text(c, data.get("checked_by", ""), 142, 545, 416, size=11)
 
         c.save()
         overlay_io.seek(0)
         overlay_page = PdfReader(overlay_io).pages[0]
-        page = template_page
-        # Copy template page each time so overlays never accumulate.
+
+        # Copy the original blank page for every practical, so overlays do not
+        # accumulate and each output page starts from the same clean template.
         import copy
         page = copy.copy(template_page)
         page.merge_page(overlay_page)
