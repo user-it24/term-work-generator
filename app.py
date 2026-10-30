@@ -173,8 +173,8 @@ def fit_text(c, text, x, y_top, max_width, font="Times-Bold", size=11, clear_lin
     c.drawString(x, baseline_y, text)
 
 
-def fit_text_centered(c, text, left, right, y_top, font="Times-Bold", size=14):
-    """Draw a value horizontally centered in its designated template field."""
+def fit_text_centered(c, text, left, right, y_top, font="Times-Bold", size=13, clear_line=False):
+    """Draw a value horizontally centered in its field without unnecessarily covering the printed underline."""
     text = str(text or "").strip()
     if not text:
         return
@@ -186,7 +186,7 @@ def fit_text_centered(c, text, left, right, y_top, font="Times-Bold", size=14):
 
     text_width = stringWidth(text, font, current_size)
     x = left + (field_width - text_width) / 2
-    fit_text(c, text, x, y_top, field_width, font=font, size=current_size, clear_line=True)
+    fit_text(c, text, x, y_top, field_width, font=font, size=current_size, clear_line=clear_line)
 
 
 def wrap_title_for_template(title, font="Times-Bold", size=11):
@@ -242,18 +242,16 @@ def build_pdf(data, titles):
         overlay_io = io.BytesIO()
         c = canvas.Canvas(overlay_io, pagesize=(page_width, page_height))
 
-        # These top-origin positions are aligned to the actual blank template.
-        # The values use a modest bold font and a small white patch to avoid
-        # printing text directly over the underscore line.
-        # Center the requested identity fields within their printed spaces and
-        # increase their text from 11 pt to 14 pt (auto-shrunk only if needed).
-        fit_text_centered(c, data.get("term", ""), 290, 378, 189, size=14)
+        # Center values inside their designated spaces. Slightly smaller text
+        # for TERM and Class keeps it from covering the printed underline.
+        # Text is placed a little above the underline so the original line stays visible.
+        fit_text_centered(c, data.get("term", ""), 290, 378, 181, size=12.5)
         fit_text(c, data.get("subject", ""), 115, 224, 445, size=12.5)
         fit_text(c, data.get("pen", ""), 98, 248, 218, size=12.5)
-        fit_text(c, data.get("semester", ""), 382, 248, 176, size=12.5)
-        fit_text_centered(c, data.get("student_name", ""), 170, 558, 272, size=14)
-        fit_text_centered(c, data.get("class_name", ""), 65, 278, 296, size=14)
-        fit_text_centered(c, data.get("batch", ""), 312, 558, 296, size=14)
+        fit_text_centered(c, data.get("semester", ""), 424, 558, 242, size=12.5)
+        fit_text_centered(c, data.get("student_name", ""), 170, 558, 268, size=13.5)
+        fit_text_centered(c, data.get("class_name", ""), 65, 278, 289, size=12.5)
+        fit_text_centered(c, data.get("batch", ""), 312, 558, 291, size=12.5)
 
         title_lines, title_size = wrap_title_for_template(title)
         title_positions = [
@@ -267,8 +265,8 @@ def build_pdf(data, titles):
                 size=title_size, clear_line=True
             )
 
-        fit_text(c, str(index), 443, 418, 125, size=11)
-        fit_text(c, data.get("checked_by", ""), 142, 545, 416, size=11)
+        fit_text_centered(c, str(index), 442, 568, 414, size=12.5)
+        fit_text(c, data.get("checked_by", ""), 142, 540, 416, size=13)
 
         c.save()
         overlay_io.seek(0)
