@@ -13,7 +13,25 @@ main{max-width:1050px;margin:24px auto;padding:0 16px 40px}.card{background:var(
 h2{font-size:19px;margin:0 0 8px}.sub{color:var(--muted);font-size:14px;margin:0 0 18px;line-height:1.5}
 .grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:15px}.field label{display:block;font-size:13px;font-weight:700;margin-bottom:7px}.field input,.field textarea{width:100%;border:1px solid #cbd5e5;border-radius:9px;padding:11px 12px;font:inherit;background:#fff;color:var(--ink)}.field input:focus,.field textarea:focus{outline:2px solid #c7d2fe;border-color:var(--primary)}
 .upload{border:2px dashed #b8c6e4;border-radius:12px;padding:22px;background:#f9fbff}.upload input{max-width:100%}.row{display:flex;align-items:center;gap:12px;flex-wrap:wrap}.btn{border:0;border-radius:10px;padding:12px 18px;font-weight:700;font-size:14px;cursor:pointer}.primary{background:var(--primary);color:white}.secondary{background:#e8edff;color:#2746bd}.btn:disabled{opacity:.5;cursor:not-allowed}.status{font-size:14px;color:var(--muted);margin-top:12px}.status.error{color:#b42318}.status.success{color:#187044}.count{font-weight:700;color:#2746bd}textarea#titles{min-height:210px;resize:vertical;line-height:1.6}.hint{font-size:12px;color:var(--muted);margin-top:6px}.actions{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}.note{font-size:13px;color:var(--muted);line-height:1.5}.badge{display:inline-block;background:#edf2ff;color:#2e49ad;border-radius:99px;padding:5px 9px;font-size:12px;font-weight:700}
-@media(max-width:650px){.grid{grid-template-columns:1fr}.card{padding:17px}}
+html{-webkit-text-size-adjust:100%;text-size-adjust:100%}
+body{overflow-x:hidden}
+.field input,.field textarea{-webkit-appearance:none;appearance:none;min-width:0;font-size:16px}
+.field,.card,.upload,.actions>div{min-width:0}
+.sub,.note,.status,.hint,.hero p{overflow-wrap:anywhere}
+.upload input[type=file]{width:100%;font-size:14px}
+@media(max-width:650px){
+header{padding:24px 16px}
+.hero h1{font-size:26px;line-height:1.2}
+main{margin:16px auto;padding:0 12px 32px}
+.card{padding:16px;border-radius:14px;margin-bottom:14px}
+.grid{grid-template-columns:1fr;gap:14px}
+.upload{padding:14px}
+.upload .row{flex-direction:column;align-items:stretch;gap:10px}
+.upload .row .badge{align-self:flex-start}
+.btn{width:100%;min-height:46px;padding:13px 16px;font-size:15px}
+.actions{flex-direction:column;align-items:stretch;gap:14px}
+textarea#titles{min-height:180px}
+}
 </style>
 </head>
 <body>
@@ -21,8 +39,8 @@ h2{font-size:19px;margin:0 0 8px}.sub{color:var(--muted);font-size:14px;margin:0
 <main>
 <form id="generatorForm" action="/generate" method="post">
 <section class="card">
-<h2>1. Upload practical list</h2><p class="sub">Upload a text-based PDF containing numbered experiments and titles. The app will extract the titles automatically.</p>
-<div class="upload"><input type="file" id="practical_pdf" name="practical_pdf" accept="application/pdf,.pdf" required><div class="row" style="margin-top:14px"><button type="button" class="btn secondary" id="extractBtn">Read practical list</button><span class="badge" id="countBadge">No list loaded</span></div><div class="status" id="uploadStatus" role="status"></div></div>
+<h2>1. Upload practical list</h2><p class="sub">Upload a text-based PDF containing numbered experiments and titles. The app will extract the titles automatically. <strong>Need only one practical?</strong> Skip this step and type the title in step 3.</p>
+<div class="upload"><input type="file" id="practical_pdf" accept="application/pdf,.pdf"><div class="row" style="margin-top:14px"><button type="button" class="btn secondary" id="extractBtn">Read practical list</button><span class="badge" id="countBadge">No list loaded</span></div><div class="status" id="uploadStatus" role="status"></div></div>
 </section>
 <section class="card">
 <h2>2. Student and subject details</h2><p class="sub">These details are repeated on every generated page.</p>
@@ -38,11 +56,12 @@ h2{font-size:19px;margin:0 0 8px}.sub{color:var(--muted);font-size:14px;margin:0
 </div>
 </section>
 <section class="card">
-<h2>3. Review experiment titles</h2><p class="sub">One title per line. Practical/Term Work No. is assigned automatically as 1, 2, 3… in the order shown below. You can correct titles if the PDF extraction is imperfect.</p>
+<h2>3. Review experiment titles</h2><p class="sub">One title per line, in practical order (line 1 = practical 1, line 2 = practical 2…). Use the box above to generate only the ones you need. You can correct titles if the PDF extraction is imperfect.</p>
+<div class="field" style="margin-bottom:15px;max-width:380px"><label for="practical_numbers">Which practicals do you want? (optional)</label><input id="practical_numbers" name="practical_numbers" inputmode="text" autocomplete="off" placeholder="Leave blank for all"><div class="hint">Blank = every title below. <b>7</b> = only practical 7 from the list. <b>2,5,7-9</b> = several. Typed one title yourself and want it printed as No. 7? Enter <b>7</b>.</div><div class="status" id="selectionPreview" role="status"></div></div>
 <div class="field"><label for="titles">Experiment titles</label><textarea id="titles" name="titles" placeholder="Upload a PDF and click “Read practical list”, or paste one title per line." required></textarea><div class="hint">Only the title and serial number vary between pages. Dates, marks, remarks and signature areas stay blank for manual completion.</div></div>
 </section>
 <section class="card">
-<div class="actions"><div><h2 style="margin-bottom:5px">4. Generate your PDF</h2><div class="note">The output contains one copy of the college term-work template per title.</div></div><button class="btn primary" type="submit">Generate & Download PDF</button></div>
+<div class="actions"><div><h2 style="margin-bottom:5px">4. Generate your PDF</h2><div class="note">The output contains one copy of the college term-work template per title.</div></div><button class="btn primary" type="submit">Generate &amp; Download PDF</button></div>
 <div class="status" id="generateStatus" role="status"></div>
 </section>
 </form>
@@ -80,10 +99,57 @@ extractBtn.addEventListener('click', async () => {
   } finally { extractBtn.disabled=false; extractBtn.textContent='Read practical list'; }
 });
 
+const numbersInput = document.getElementById('practical_numbers');
+const preview = document.getElementById('selectionPreview');
+
+function currentTitles(){ return titlesBox.value.split(/\r?\n/).map(x=>x.trim()).filter(Boolean); }
+
+function parseNumbers(spec){
+  const out = new Set();
+  for (const token of spec.trim().split(/[,\s;]+/)) {
+    if (!token) continue;
+    const m = token.match(/^(\d{1,2})(?:[-–](\d{1,2}))?$/);
+    if (!m) throw new Error(`"${token}" is not a valid practical number. Use e.g. 7 or 2,5,7-9.`);
+    const lo = +m[1], hi = m[2] ? +m[2] : lo;
+    if (lo < 1 || hi < lo || hi > 99) throw new Error(`"${token}" is not a valid practical number range.`);
+    for (let n = lo; n <= hi; n++) out.add(n);
+  }
+  return [...out].sort((a,b)=>a-b);
+}
+
+function selectPracticals(titles, spec){
+  const nums = parseNumbers(spec);
+  if (!nums.length) return titles.map((t,i)=>[i+1,t]);
+  if (nums.every(n => n <= titles.length)) return nums.map(n=>[n, titles[n-1]]);
+  if (nums.length === titles.length) return nums.map((n,i)=>[n, titles[i]]);
+  throw new Error(`You asked for practical number(s) ${nums.join(', ')}, but the list below has ${titles.length} title(s). Enter one title for each number, or pick numbers that exist in the list.`);
+}
+
+function updatePreview(){
+  const titles = currentTitles();
+  if (!titles.length) { preview.textContent = ''; preview.className = 'status'; return; }
+  try {
+    const picked = selectPracticals(titles, numbersInput.value);
+    const text = picked.length > 4
+      ? `${picked.length} pages: No. ${picked[0][0]} to No. ${picked[picked.length-1][0]}`
+      : picked.map(([n,t]) => `No. ${n} – ${t.length > 45 ? t.slice(0,45) + '…' : t}`).join('  |  ');
+    preview.textContent = `Will generate ${picked.length} page(s): ${text}`;
+    preview.className = 'status success';
+  } catch (err) {
+    preview.textContent = err.message; preview.className = 'status error';
+  }
+}
+titlesBox.addEventListener('input', updatePreview);
+numbersInput.addEventListener('input', updatePreview);
+new MutationObserver(updatePreview).observe(countBadge, {childList:true, characterData:true, subtree:true});
+
 document.getElementById('generatorForm').addEventListener('submit', (e) => {
-  const lines = titlesBox.value.split(/\r?\n/).map(x=>x.trim()).filter(Boolean);
-  if (!lines.length) { e.preventDefault(); alert('Add at least one practical title.'); return; }
-  document.getElementById('generateStatus').textContent = `Generating ${lines.length} page(s)…`;
+  const titles = currentTitles();
+  if (!titles.length) { e.preventDefault(); alert('Add at least one practical title.'); return; }
+  let picked;
+  try { picked = selectPracticals(titles, numbersInput.value); }
+  catch (err) { e.preventDefault(); alert(err.message); return; }
+  document.getElementById('generateStatus').textContent = `Generating ${picked.length} page(s)…`;
 });
 </script>
 </body>
