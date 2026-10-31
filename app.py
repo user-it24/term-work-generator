@@ -5,12 +5,28 @@ import textwrap
 from flask import Flask, render_template, request, jsonify, send_file
 import pymupdf as fitz  # PyMuPDF
 from reportlab.pdfgen import canvas
+from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.pdfmetrics import stringWidth
+from reportlab.pdfbase.ttfonts import TTFont
 from pypdf import PdfReader, PdfWriter
 
 app = Flask(__name__)
 app.config["MAX_CONTENT_LENGTH"] = 20 * 1024 * 1024  # 20 MB
 TEMPLATE_PATH = os.path.join(os.path.dirname(__file__), "term_work_template.pdf")
+
+# Embed a Times-compatible font in the generated PDF. Liberation Serif Bold has the
+# same character widths as Times New Roman Bold, so desktop layout stays identical,
+# but because the font is embedded, phone PDF viewers can no longer swap in a
+# different (wider/narrower) font that pushes text out of its field.
+FONT_BOLD = "Times-Bold"  # fallback if the font file is missing
+for _font_path in (
+    os.path.join(os.path.dirname(__file__), "fonts", "LiberationSerif-Bold.ttf"),
+    os.path.join(os.path.dirname(__file__), "LiberationSerif-Bold.ttf"),
+):
+    if os.path.exists(_font_path):
+        pdfmetrics.registerFont(TTFont("TermSerifBold", _font_path))
+        FONT_BOLD = "TermSerifBold"
+        break
 
 def _extract_titles_iot(pdf_bytes):
     """Extract practical titles, including table-based PDFs with a separate Sr. No. column."""
@@ -201,6 +217,49 @@ def _titles_from_table_rows(rows):
     return found
 
 
+def _words_in_bbox(words, bbox):
+    """Join the words whose centre lies inside bbox, with single spaces, in reading order."""
+    x0, y0, x1, y1 = bbox
+    picked = [
+        w for w in words
+        if x0 <= (w[0] + w[2]) / 2 <= x1 and y0 <= (w[1] + w[3]) / 2 <= y1
+    ]
+    picked.sort(key=lambda w: (w[1] + w[3]) / 2)
+
+    # group into visual lines, then left-to-right inside each line
+    lines, current, current_y = [], [], None
+    for w in picked:
+        ymid = (w[1] + w[3]) / 2
+        if current_y is None or abs(ymid - current_y) <= 3:
+            current.append(w)
+            current_y = ymid if current_y is None else (current_y + ymid) / 2
+        else:
+            lines.append(current)
+            current, current_y = [w], ymid
+    if current:
+        lines.append(current)
+
+    return " ".join(
+        " ".join(w[4] for w in sorted(line, key=lambda w: w[0])) for line in lines
+    )
+
+
+def _table_rows_with_spaces(page_words, tab):
+    """Rows of cell text built from the page's words, so spaces are never lost."""
+    try:
+        rows = []
+        for row in tab.rows:
+            rows.append([
+                _words_in_bbox(page_words, bbox) if bbox else ""
+                for bbox in row.cells
+            ])
+        if rows:
+            return rows
+    except Exception:
+        pass
+    return tab.extract()
+
+
 def _titles_from_tables(pdf_bytes):
     """Read the index table cell by cell (works across multiple pages)."""
     doc = fitz.open(stream=pdf_bytes, filetype="pdf")
@@ -211,8 +270,9 @@ def _titles_from_tables(pdf_bytes):
                 tables = page.find_tables().tables
             except Exception:
                 continue
+            page_words = page.get_text("words")
             for tab in tables:
-                found.extend(_titles_from_table_rows(tab.extract()))
+                found.extend(_titles_from_table_rows(_table_rows_with_spaces(page_words, tab)))
     finally:
         doc.close()
 
@@ -237,7 +297,7 @@ def extract_titles(pdf_bytes):
     return best
 
 
-def fit_text(c, text, x, y_top, max_width, font="Times-Bold", size=11, clear_line=True):
+def fit_text(c, text, x, y_top, max_width, font=FONT_BOLD, size=11, clear_line=True):
     """Draw moderately bold text, fitting it inside the target field.
 
     y_top is measured from the top edge of the A4 page. A small white
@@ -271,7 +331,7 @@ def fit_text(c, text, x, y_top, max_width, font="Times-Bold", size=11, clear_lin
     c.drawString(x, baseline_y, text)
 
 
-def fit_text_centered(c, text, left, right, y_top, font="Times-Bold", size=13, clear_line=False):
+def fit_text_centered(c, text, left, right, y_top, font=FONT_BOLD, size=13, clear_line=False):
     """Draw a value horizontally centered in its field without unnecessarily covering the printed underline."""
     text = str(text or "").strip()
     if not text:
@@ -318,7 +378,7 @@ BULLET_SPLIT = re.compile(r"\s*[•●▪■◦]\s*")
 SUBSTEP_SPLIT = re.compile(r"\s+\d{1,2}\)\s+")
 
 
-def shorten_title_to_fit(title, font="Times-Bold", min_size=10.5):
+def shorten_title_to_fit(title, font=FONT_BOLD, min_size=10.5):
     """Cut an over-long title so it fits the template's 3 title lines.
 
     1. Drop numbered sub-steps ("1) ...", "2) ...").
@@ -353,7 +413,7 @@ def shorten_title_to_fit(title, font="Times-Bold", min_size=10.5):
     return (" ".join(words).rstrip(" ,;:-–") + "...") if words else head[:60] + "..."
 
 
-def wrap_title_for_template(title, font="Times-Bold", size=13):
+def wrap_title_for_template(title, font=FONT_BOLD, size=13):
     """Wrap title for the short first line and two full-width continuation lines.
 
     Titles that fit are wrapped exactly as before. Titles that cannot fit in
