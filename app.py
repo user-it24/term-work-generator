@@ -12,7 +12,7 @@ app = Flask(__name__)
 app.config["MAX_CONTENT_LENGTH"] = 20 * 1024 * 1024  # 20 MB
 TEMPLATE_PATH = os.path.join(os.path.dirname(__file__), "term_work_template.pdf")
 
-def extract_titles(pdf_bytes):
+def _extract_titles_iot(pdf_bytes):
     """Extract practical titles, including table-based PDFs with a separate Sr. No. column."""
     doc = fitz.open(stream=pdf_bytes, filetype="pdf")
     found = []
@@ -139,6 +139,104 @@ def extract_titles(pdf_bytes):
             seen.add(key)
     return [title for _, title in unique]
 
+def _clean_title(text):
+    text = re.sub(r"\s+", " ", str(text or "")).strip()
+    text = re.split(r"\baim\s*:", text, maxsplit=1, flags=re.I)[0]
+    return text.strip(" .\t-–:")
+
+
+def _titles_from_table_rows(rows):
+    """Pull (serial, title) pairs out of one extracted table (list of rows)."""
+    if not rows:
+        return []
+    ncols = max(len(r) for r in rows)
+    serial_col, title_col = None, None
+
+    # Look for header cells (short text only, so title text is never mistaken for a header).
+    for r in rows[:3]:
+        for ci, cell in enumerate(r):
+            h = re.sub(r"\s+", " ", str(cell or "")).strip().lower()
+            if not h or len(h) > 20:
+                continue
+            if serial_col is None and re.fullmatch(r"(sr\.?|s\.?\s?no\.?|serial)(\s*no\.?)?|no\.?", h):
+                serial_col = ci
+            elif title_col is None and re.search(r"title|experiment|practical|aim|topic|program", h):
+                title_col = ci
+
+    # Serial column default: the leftmost column whose cells are mostly numbers.
+    if serial_col is None:
+        best, best_hits = 0, -1
+        for ci in range(ncols):
+            hits = sum(
+                1 for r in rows
+                if ci < len(r) and re.fullmatch(r"\d{1,3}\s*[.)]?", str(r[ci] or "").strip())
+            )
+            if hits > best_hits:
+                best, best_hits = ci, hits
+        serial_col = best
+
+    # Title column default: the column (other than serial) holding the most text.
+    if title_col is None or title_col == serial_col:
+        best, best_len = None, -1
+        for ci in range(ncols):
+            if ci == serial_col:
+                continue
+            total = sum(len(str(r[ci] or "")) for r in rows if ci < len(r))
+            if total > best_len:
+                best, best_len = ci, total
+        title_col = best
+    if title_col is None:
+        return []
+
+    found = []
+    for r in rows:
+        if serial_col >= len(r) or title_col >= len(r):
+            continue
+        m = re.fullmatch(r"(\d{1,3})\s*[.)]?", re.sub(r"\s+", "", str(r[serial_col] or "")))
+        if not m:
+            continue
+        title = _clean_title(r[title_col])
+        if title and len(title) > 1:
+            found.append((int(m.group(1)), title))
+    return found
+
+
+def _titles_from_tables(pdf_bytes):
+    """Read the index table cell by cell (works across multiple pages)."""
+    doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+    found = []
+    try:
+        for page in doc:
+            try:
+                tables = page.find_tables().tables
+            except Exception:
+                continue
+            for tab in tables:
+                found.extend(_titles_from_table_rows(tab.extract()))
+    finally:
+        doc.close()
+
+    by_number = {}
+    for number, title in found:
+        by_number.setdefault(number, title)
+    return [by_number[n] for n in sorted(by_number)]
+
+
+def extract_titles(pdf_bytes):
+    """Run the table reader and the original IoT reader; keep whichever finds
+    more practicals. The IoT reader wins ties, so IoT behaviour is unchanged."""
+    best = []
+    for strategy in (_extract_titles_iot, _titles_from_tables):
+        try:
+            result = strategy(pdf_bytes)
+        except Exception:
+            app.logger.exception("Strategy %s failed", strategy.__name__)
+            continue
+        if len(result) > len(best):
+            best = result
+    return best
+
+
 def fit_text(c, text, x, y_top, max_width, font="Times-Bold", size=11, clear_line=True):
     """Draw moderately bold text, fitting it inside the target field.
 
@@ -189,45 +287,105 @@ def fit_text_centered(c, text, left, right, y_top, font="Times-Bold", size=13, c
     fit_text(c, text, x, y_top, field_width, font=font, size=current_size, clear_line=clear_line)
 
 
-def wrap_title_for_template(title, font="Times-Bold", size=13):
-    """Wrap title for the short first line and two full-width continuation lines."""
+TITLE_FIRST_WIDTH = 560.5 - 317.0
+TITLE_CONT_WIDTH = 560.5 - 66.0
+
+
+def _wrap_words(words, font, font_size):
+    """Greedy wrap into the short first line, then full-width continuation lines."""
+    lines = []
+    current = ""
+    available = TITLE_FIRST_WIDTH
+
+    for word in words:
+        trial = f"{current} {word}".strip()
+        if stringWidth(trial, font, font_size) <= available:
+            current = trial
+        elif not current:
+            # A single unusually long word: allow fit_text to shrink it.
+            current = word
+        else:
+            lines.append(current)
+            current = word
+            available = TITLE_CONT_WIDTH
+
+    if current:
+        lines.append(current)
+    return lines
+
+
+BULLET_SPLIT = re.compile(r"\s*[•●▪■◦]\s*")
+SUBSTEP_SPLIT = re.compile(r"\s+\d{1,2}\)\s+")
+
+
+def shorten_title_to_fit(title, font="Times-Bold", min_size=10.5):
+    """Cut an over-long title so it fits the template's 3 title lines.
+
+    1. Drop numbered sub-steps ("1) ...", "2) ...").
+    2. Keep as many whole sentences as fit.
+    3. If even the first sentence is too long, cut at a word and add "...".
+    """
+    def fits(text):
+        return len(_wrap_words(text.split(), font, min_size)) <= 3
+
     title = re.sub(r"\s+", " ", str(title or "")).strip()
-    words = title.split()
-    if not words:
+    if not title or fits(title):
+        return title
+
+    head = SUBSTEP_SPLIT.split(title)[0].strip() or title
+    sentences = re.split(r"(?<=[.!?])\s+", head)
+    kept = []
+    for sentence in sentences:
+        if fits(" ".join(kept + [sentence])):
+            kept.append(sentence)
+        else:
+            break
+    # Don't end on a dangling "as below:" style sentence.
+    while len(kept) > 1 and kept[-1].rstrip().endswith(":"):
+        kept.pop()
+    if kept:
+        return " ".join(kept).strip(" :;,-–")
+
+    # Even the first sentence is too long: cut at a word boundary.
+    words = head.split()
+    while words and not fits(" ".join(words) + "..."):
+        words.pop()
+    return (" ".join(words).rstrip(" ,;:-–") + "...") if words else head[:60] + "..."
+
+
+def wrap_title_for_template(title, font="Times-Bold", size=13):
+    """Wrap title for the short first line and two full-width continuation lines.
+
+    Titles that fit are wrapped exactly as before. Titles that cannot fit in
+    the three template lines are automatically shortened first.
+    """
+    title = re.sub(r"\s+", " ", str(title or "")).strip()
+    # Bullet lists ("• step one • step two") never belong in the title line.
+    title = BULLET_SPLIT.split(title)[0].strip(" :;,-–") or title
+    if not title.split():
         return [], size
 
-    first_width = 560.5 - 317.0
-    continuation_width = 560.5 - 66.0
+    sizes = [size, 12.5, 12, 11.5, 11, 10.5, 10, 9.5]
 
-    # Try a comfortably readable font first, then reduce it slightly only for
-    # unusually long titles so the complete title fits into the template area.
-    for font_size in [size, 12.5, 12, 11.5, 11, 10.5, 10, 9.5]:
-        lines = []
-        current = ""
-        available = first_width
+    def try_fit(text):
+        words = text.split()
+        for font_size in sizes:
+            lines = _wrap_words(words, font, font_size)
+            if len(lines) <= 3:
+                return lines, font_size
+        return None
 
-        for word in words:
-            trial = f"{current} {word}".strip()
-            if stringWidth(trial, font, font_size) <= available:
-                current = trial
-            elif not current:
-                # A single unusually long word: allow fit_text to shrink it.
-                current = word
-            else:
-                lines.append(current)
-                current = word
-                available = continuation_width
+    result = try_fit(title)
+    if result:
+        return result
 
-        if current:
-            lines.append(current)
+    shortened = shorten_title_to_fit(title, font)
+    result = try_fit(shortened)
+    if result:
+        return result
 
-        # The template provides three title lines. Only accept a size that
-        # fits the entire title in those lines; never silently discard words.
-        if len(lines) <= 3:
-            return lines, font_size
-
-    # For exceptionally long titles, retain all words and let the last line
-    # be shrunk to fit its available width.
+    # Last-resort safety net (should not normally be reached).
+    lines = _wrap_words(shortened.split(), font, 9.5)
     return lines[:3], 9.5
 
 
