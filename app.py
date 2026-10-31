@@ -599,9 +599,11 @@ def generate():
     except Exception as exc:
         app.logger.exception("PDF generation failed")
         return f"PDF generation failed: {exc}", 500
-    safe_name = re.sub(r"[^A-Za-z0-9_-]+", "_", data["student_name"]).strip("_") or "student"
+    # File name: "Term Work <Subject>.pdf" (characters Windows/Android reject are removed)
+    subject_name = re.sub(r'[\\/:*?"<>|\r\n\t]+', " ", data["subject"])
+    subject_name = re.sub(r"\s+", " ", subject_name).strip(" .")[:80] or "Practical"
     return send_file(output, mimetype="application/pdf", as_attachment=True,
-                     download_name=f"Term_Work_{safe_name}.pdf")
+                     download_name=f"Term Work {subject_name}.pdf")
 
 @app.errorhandler(413)
 def too_large(_error):
