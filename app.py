@@ -449,6 +449,46 @@ def wrap_title_for_template(title, font=FONT_BOLD, size=13):
     return lines[:3], 9.5
 
 
+def parse_practical_numbers(spec):
+    """'7' -> [7];  '2,5,7-9' -> [2, 5, 7, 8, 9].  Blank -> []."""
+    numbers = set()
+    for token in re.split(r"[,\s;]+", str(spec or "").strip()):
+        if not token:
+            continue
+        m = re.fullmatch(r"(\d{1,2})(?:\s*[-–]\s*(\d{1,2}))?", token)
+        if not m:
+            raise ValueError(f"'{token}' is not a valid practical number. Use e.g. 7 or 2,5,7-9.")
+        low = int(m.group(1))
+        high = int(m.group(2)) if m.group(2) else low
+        if low < 1 or high < low or high > 99:
+            raise ValueError(f"'{token}' is not a valid practical number range.")
+        numbers.update(range(low, high + 1))
+    return sorted(numbers)
+
+
+def select_practicals(titles, spec):
+    """Decide which practicals to generate and which number each page prints.
+
+    * blank                       -> every title, numbered 1, 2, 3 ...
+    * numbers that exist in list  -> only those titles, keeping their list number
+                                     (list of 10, "7" -> only practical 7)
+    * numbers beyond the list     -> labels for typed titles, in order
+                                     (one typed title, "7" -> printed as No. 7)
+    """
+    numbers = parse_practical_numbers(spec)
+    if not numbers:
+        return list(enumerate(titles, start=1))
+    if all(n <= len(titles) for n in numbers):
+        return [(n, titles[n - 1]) for n in numbers]
+    if len(numbers) == len(titles):
+        return list(zip(numbers, titles))
+    raise ValueError(
+        f"You asked for practical number(s) {', '.join(map(str, numbers))}, "
+        f"but the list below has {len(titles)} title(s). Enter one title for each "
+        "number, or pick numbers that exist in the list."
+    )
+
+
 def build_pdf(data, titles):
     # Keep the original template bytes and load a fresh page for every practical.
     # A shallow copy of a pypdf PageObject can share internal content/resources;
@@ -463,7 +503,14 @@ def build_pdf(data, titles):
     page_height = float(first_page.mediabox.height)
     writer = PdfWriter()
 
-    for index, title in enumerate(titles, start=1):
+    # `titles` is a list of (practical_no, title) pairs; plain strings are
+    # numbered 1, 2, 3 ... for backward compatibility.
+    items = [
+        item if isinstance(item, (tuple, list)) else (position, item)
+        for position, item in enumerate(titles, start=1)
+    ]
+
+    for practical_no, title in items:
         template_reader = PdfReader(io.BytesIO(template_bytes))
         template_page = template_reader.pages[0]
         overlay_io = io.BytesIO()
@@ -472,18 +519,18 @@ def build_pdf(data, titles):
         # Center values inside their designated spaces. Slightly smaller text
         # for TERM and Class keeps it from covering the printed underline.
         # Text is placed a little above the underline so the original line stays visible.
-        fit_text_centered(c, data.get("term", ""), 290, 378, 190, size=11.5)
-        fit_text(c, data.get("subject", ""), 115, 224, 445, size=12.5)
-        fit_text(c, data.get("pen", ""), 98, 248, 218, size=12.5)
-        fit_text_centered(c, data.get("semester", ""), 424, 558, 248, size=12.5)
-        fit_text_centered(c, data.get("student_name", ""), 170, 558, 272, size=13.5)
-        fit_text_centered(c, data.get("class_name", ""), 65, 278, 298, size=11.5)
-        fit_text_centered(c, data.get("batch", ""), 312, 558, 297, size=12.5)
+        fit_text_centered(c, data.get("term", ""), 290, 378, 188.9, size=11.5)
+        fit_text(c, data.get("subject", ""), 115, 222.8, 445, size=12.5)
+        fit_text(c, data.get("pen", ""), 98, 246.7, 218, size=12.5)
+        fit_text_centered(c, data.get("semester", ""), 424, 558, 246.7, size=12.5)
+        fit_text_centered(c, data.get("student_name", ""), 170, 558, 270.1, size=13.5)
+        fit_text_centered(c, data.get("class_name", ""), 65, 278, 295.7, size=11.5)
+        fit_text_centered(c, data.get("batch", ""), 312, 558, 294.7, size=12.5)
 
         title_lines, title_size = wrap_title_for_template(title)
         title_positions = [
-            (317, 320, 243),
-            (66, 344, 494),
+            (317, 319.25, 243),
+            (66, 343.6, 494),
             (66, 368, 494),
         ]
         for line, (x, y_top, max_width) in zip(title_lines, title_positions):
@@ -492,7 +539,7 @@ def build_pdf(data, titles):
                 size=title_size, clear_line=True
             )
 
-        fit_text_centered(c, str(index), 442, 568, 419, size=12.5)
+        fit_text_centered(c, str(practical_no), 442, 568, 417.8, size=12.5)
         fit_text(c, data.get("checked_by", ""), 142, 544, 416, size=13)
 
         c.save()
@@ -543,6 +590,10 @@ def generate():
     required = ["term", "subject", "pen", "semester", "student_name", "class_name", "batch", "checked_by"]
     if any(not data[k] for k in required):
         return "Please complete all eight student/detail fields.", 400
+    try:
+        titles = select_practicals(titles, request.form.get("practical_numbers", ""))
+    except ValueError as exc:
+        return str(exc), 400
     try:
         output = build_pdf(data, titles)
     except Exception as exc:
